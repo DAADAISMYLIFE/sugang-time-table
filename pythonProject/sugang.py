@@ -1,0 +1,85 @@
+# 부산대학교 수강신청 툴
+# 1. 수강신청 로그인 페이지 진입
+# 2. 스레드 4개 생성, 각각 UTC 기준 07시 59분 58초, 59초, 59.5초, 8시 정각에 로그인 시도
+# 3. 로그인 되는 순서대로 수강신청 진행
+
+import time, datetime, threading
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+
+
+def get_driver():  # driver 생성 함수
+    driver = getattr(threadLocal, "driver", None)
+    if driver is None:
+        options = webdriver.ChromeOptions()
+        options.add_experimental_option("excludeSwitches", ["enable-logging"])
+        driver = webdriver.Chrome(options=options)
+    return driver
+
+
+def sugang(ob_time):  # 수강신청 메인 함수
+    # 1. 수강신청 로그인 페이지 진입
+    driver = get_driver()
+    driver.get("https://sugang.pusan.ac.kr/login")
+
+    # 2. 정해진 시간에 로그인 엘리먼트 클릭
+    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.XPATH, '//*[@id="userID"]')))
+    driver.find_element(By.XPATH, value='//*[@id="userID"]').send_keys(id)
+    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.XPATH, "//*[@id='txtpassword']")))
+    driver.find_element(By.XPATH, value="//*[@id='txtpassword']").send_keys(pw)
+    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.XPATH, "//*[@id='btnlogin']")))
+
+    curr_time = (datetime.datetime.utcnow() + datetime.timedelta(hours=9)).time()
+    while float(curr_time.strftime("%H%M%S")) <= float(
+            datetime.time(8, 59, 59, 999999).strftime("%H%M%S.%f")) - ob_time - 0.5:
+        curr_time = (datetime.datetime.utcnow() + datetime.timedelta(hours=9)).time()
+    driver.find_element(By.XPATH, value="//*[@id='btnlogin']").click()
+    print(f"Thread {threading.get_native_id()} : {curr_time} 로그인 성공")
+
+    # 3. 수강신청 페이지 진입 후, 희망과목 수강신청 엘리먼트 클릭
+    WebDriverWait(driver, 600).until(EC.presence_of_all_elements_located((By.XPATH, "//*[contains(@id,'_bt신청')]")))
+    subjects = driver.find_elements(by=By.XPATH, value="//*[contains(@id,'_bt신청')]")
+    for i in range(0, len(subjects)):
+        subjects[i].click()
+        WebDriverWait(driver, 90).until(EC.presence_of_all_elements_located((By.XPATH, "//*[contains(@id,'_bt신청')]")))
+        subjects = driver.find_elements(by=By.XPATH, value="//*[contains(@id,'_bt신청')]")
+        try:  # 수강신청 당일 결과창이 늦게 뜨는 경우 대비 예외처리
+            res = driver.find_element(by=By.XPATH, value="//*[@id='lbError']")
+            print(f"{i + 1}번째 과목 : {res.text}\n")
+        except:
+            print(f"{i + 1}번째 과목 : 신청 성공!(서버렉으로 인해 자세한 정보가 표기되지 않음)\n")
+    print("수강신청 완료! 프로그램을 닫아도 좋습니다.")
+
+
+def time_display():  # 시간 표시용 함수. 꼭 필요한 것은 아님
+    curr_time = (datetime.datetime.utcnow() + datetime.timedelta(hours=9)).time()
+    while float(curr_time.strftime("%H%M%S")) <= float(datetime.time(8, 59, 59, 999999).strftime("%H%M%S.%f")) - \
+            lst_time[1] - 0.5:  # 0.5 오차 보정
+        curr_time = (datetime.datetime.utcnow() + datetime.timedelta(hours=9)).time()
+        print(f"현재시간(UTC+9) : {curr_time}", end="\r")
+        time.sleep(0.02)
+    print("")
+
+
+def main():
+    threads = []
+    for tm in lst_time:  # lst_time 요소 개수만큼 스레드 생성
+        t = threading.Thread(target=sugang, args=(tm,))
+        threads.append(t)
+        t.start()
+    t_time = threading.Thread(target=time_display)  # 시간 표시 스레드
+    t_time.start()
+
+
+if __name__ == "__main__":
+    lst_time = [2, 1, 0.5, 0]  # 각 스레드별 진입 시간 설정
+    threadLocal = threading.local()
+
+    print("로그인 정보 입력... 정확히 입력해 주세요.")
+    id = input("학번 입력 : ")
+    pw = input("비밀번호 입력 : ")
+    print("입력 완료! 잠시후 로그인을 시도합니다.\n")
+
+    main()
