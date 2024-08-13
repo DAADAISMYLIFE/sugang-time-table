@@ -1,85 +1,198 @@
-# 부산대학교 수강신청 툴
-# 1. 수강신청 로그인 페이지 진입
-# 2. 스레드 4개 생성, 각각 UTC 기준 07시 59분 58초, 59초, 59.5초, 8시 정각에 로그인 시도
-# 3. 로그인 되는 순서대로 수강신청 진행
-
-import time, datetime, threading
+import time
+from getpass import getpass
 from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support.ui import Select, WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException
+from webdriver_manager.chrome import ChromeDriverManager
+
+# 상수 정의
+URL = "http://sugang.deu.ac.kr:8080/DEUSugangPage.aspx#"
+COURSE_TYPE = '교양'
+GYOYANG_INDEX = 1
+MAX_COLWIDTH = 15  # 최대 열 너비
 
 
-def get_driver():  # driver 생성 함수
-    driver = getattr(threadLocal, "driver", None)
-    if driver is None:
-        options = webdriver.ChromeOptions()
-        options.add_experimental_option("excludeSwitches", ["enable-logging"])
-        driver = webdriver.Chrome(options=options)
-    return driver
+def input_schedule():
+    day = input("수업 요일을 입력하세요 (예: 월, 화, 수, 목, 금): ").strip()
+    time_range = input("가능한 시간을 입력하세요 (예: 1-4, 5-8): ").strip()
+
+    # 시간 범위 처리
+    start, end = map(int, time_range.split('-')) if '-' in time_range else (int(time_range), int(time_range))
+
+    return day, start, end
 
 
-def sugang(ob_time):  # 수강신청 메인 함수
-    # 1. 수강신청 로그인 페이지 진입
-    driver = get_driver()
-    driver.get("https://sugang.pusan.ac.kr/login")
+def filter_classes(all_data, day, start, end):
+    filtered_data = []
 
-    # 2. 정해진 시간에 로그인 엘리먼트 클릭
-    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.XPATH, '//*[@id="userID"]')))
-    driver.find_element(By.XPATH, value='//*[@id="userID"]').send_keys(id)
-    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.XPATH, "//*[@id='txtpassword']")))
-    driver.find_element(By.XPATH, value="//*[@id='txtpassword']").send_keys(pw)
-    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.XPATH, "//*[@id='btnlogin']")))
+    for subject_name, classroom, professor in all_data:
+        if classroom == "사이버강좌":
+            filtered_data.append([subject_name, classroom, professor])
+        else:
+            if "[" in classroom and "]" in classroom:
+                time_info = classroom.split('[')[1][:-1]  # "월7-8" 부분
+                lecture_day, time_range = time_info[0], time_info[1:]  # 요일 및 시간
 
-    curr_time = (datetime.datetime.utcnow() + datetime.timedelta(hours=9)).time()
-    while float(curr_time.strftime("%H%M%S")) <= float(
-            datetime.time(8, 59, 59, 999999).strftime("%H%M%S.%f")) - ob_time - 0.5:
-        curr_time = (datetime.datetime.utcnow() + datetime.timedelta(hours=9)).time()
-    driver.find_element(By.XPATH, value="//*[@id='btnlogin']").click()
-    print(f"Thread {threading.get_native_id()} : {curr_time} 로그인 성공")
+                available_start, available_end = map(int, time_range.split('-')) if '-' in time_range else (
+                    int(time_range), int(time_range))
 
-    # 3. 수강신청 페이지 진입 후, 희망과목 수강신청 엘리먼트 클릭
-    WebDriverWait(driver, 600).until(EC.presence_of_all_elements_located((By.XPATH, "//*[contains(@id,'_bt신청')]")))
-    subjects = driver.find_elements(by=By.XPATH, value="//*[contains(@id,'_bt신청')]")
-    for i in range(0, len(subjects)):
-        subjects[i].click()
-        WebDriverWait(driver, 90).until(EC.presence_of_all_elements_located((By.XPATH, "//*[contains(@id,'_bt신청')]")))
-        subjects = driver.find_elements(by=By.XPATH, value="//*[contains(@id,'_bt신청')]")
-        try:  # 수강신청 당일 결과창이 늦게 뜨는 경우 대비 예외처리
-            res = driver.find_element(by=By.XPATH, value="//*[@id='lbError']")
-            print(f"{i + 1}번째 과목 : {res.text}\n")
-        except:
-            print(f"{i + 1}번째 과목 : 신청 성공!(서버렉으로 인해 자세한 정보가 표기되지 않음)\n")
-    print("수강신청 완료! 프로그램을 닫아도 좋습니다.")
+                # 요일 체크 및 시간 범위 비교
+                if lecture_day == day and not (available_end <= start or available_start >= end):
+                    filtered_data.append([subject_name, classroom, professor])
+
+    return filtered_data
 
 
-def time_display():  # 시간 표시용 함수. 꼭 필요한 것은 아님
-    curr_time = (datetime.datetime.utcnow() + datetime.timedelta(hours=9)).time()
-    while float(curr_time.strftime("%H%M%S")) <= float(datetime.time(8, 59, 59, 999999).strftime("%H%M%S.%f")) - \
-            lst_time[1] - 0.5:  # 0.5 오차 보정
-        curr_time = (datetime.datetime.utcnow() + datetime.timedelta(hours=9)).time()
-        print(f"현재시간(UTC+9) : {curr_time}", end="\r")
-        time.sleep(0.02)
-    print("")
+def input_user():
+    id = input("학번 : ")
+    pw = getpass("비번 : ")
+
+    # CATEGORY 입력 받기
+    while True:
+        print("카테고리를 선택하세요:")
+        print("1: 자율교양")
+        print("2: 균형교양")
+        choice = input("선택 (1~2): ")
+
+        if choice == "1":
+            category = "23 자율교양"
+            break
+        elif choice == "2":
+            category = "25 균형교양"
+            break
+        else:
+            print("잘못된 입력입니다. 1~5 중 하나를 입력해 주세요.")
+
+    gyoyang_index = None
+    if category == "25 균형교양":
+        while True:
+            print("균형교양 인덱스를 선택하세요:")
+            print("1: 인간의 이해")
+            print("2: 사회의 이해")
+            print("3: 자연의 이해")
+            print("4: SW의 이해")
+            print("5: 공통")
+            gyoyang_index = int(input("선택 (1~5): "))
+
+            if not (1 <= gyoyang_index <= 5):
+                print("잘못된 입력입니다. 1~5 중 하나를 입력해 주세요.")
+            else:
+                break
+
+    return id, pw, category, gyoyang_index
+
+
+def setup_driver():
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-infobars")
+    chrome_options.add_argument("--disk-cache-size=20000000")
+    chrome_options.add_argument("--media-cache-size=20000000")
+    chrome_options.add_argument("--log-level=3")
+    chrome_options.add_argument("--disable-extensions")
+    return webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+
+
+def login(driver, id, pw):
+    driver.get(URL)
+    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.XPATH, '//*[@id="txtID"]')))
+    driver.find_element(By.XPATH, '//*[@id="txtID"]').send_keys(id)
+    driver.find_element(By.XPATH, '//*[@id="txtPW"]').send_keys(pw)
+    driver.find_element(By.XPATH, '//*[@id="ibtnLogin"]').click()
+
+
+def select_dropdown(driver, xpath, value):
+    WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.XPATH, xpath)))
+    dropdown = Select(driver.find_element(By.XPATH, xpath))
+    if isinstance(value, int):
+        dropdown.select_by_index(value)
+    else:
+        dropdown.select_by_visible_text(value)
+
+
+def extract_data(driver):
+    all_data = []
+    page_count = 2
+
+    while True:
+        try:
+            WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.ID, "CP1_grdView")))
+            table = driver.find_element(By.ID, "CP1_grdView")
+            rows = table.find_elements(By.TAG_NAME, "tr")
+
+            for row in rows:
+                cells = row.find_elements(By.TAG_NAME, "td")
+                if len(cells) >= 9:
+                    subject_name = cells[4].text
+                    classroom = cells[7].text
+                    professor = cells[8].text
+                    all_data.append([subject_name, classroom, professor])
+
+            try:
+                next_page_button = driver.find_element(By.ID, f'CP1_COM_Page_Controllor1_lbtnPage{page_count}')
+                next_page_button.click()
+                page_count += 1
+                time.sleep(0.5)
+            except Exception:
+                break  # 더 이상 다음 페이지가 없으면 종료
+
+        except TimeoutException:
+            print("데이터 추출 중 타임 아웃 발생.")
+            break
+
+    return all_data
 
 
 def main():
-    threads = []
-    for tm in lst_time:  # lst_time 요소 개수만큼 스레드 생성
-        t = threading.Thread(target=sugang, args=(tm,))
-        threads.append(t)
-        t.start()
-    t_time = threading.Thread(target=time_display)  # 시간 표시 스레드
-    t_time.start()
+    id, pw, category, gyoyang_index = input_user()
+    driver = setup_driver()
+
+    try:
+        login(driver, id, pw)
+        WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.XPATH, '//*[@id="pnl_stu"]/ul/li[2]/a')))
+        driver.find_element(By.XPATH, '//*[@id="pnl_stu"]/ul/li[2]/a').click()
+        driver.switch_to.frame("contentFrame")
+
+        select_dropdown(driver, '//*[@id="CP1_ddlSubjType"]', COURSE_TYPE)
+        select_dropdown(driver, '//*[@id="CP1_ddlIsuGb"]', category)
+
+        gyoyang_domain = ""
+
+        if gyoyang_index is not None:
+            select_dropdown(driver, '//*[@id="CP1_ddlGyoyangGb21"]', gyoyang_index)
+            gyoyang_domain = ["인간의이해", "사회의이해", "자연의이해", "SW의이해", "공통"]
+            gyoyang_domain = gyoyang_domain[gyoyang_index]
+
+        driver.find_element(By.XPATH, '//*[@id="CP1_BtnSearch"]').click()
+        all_data = extract_data(driver)
+
+        # 사용자에게 요일과 시간 범위를 입력받음
+        day, start, end = input_schedule()
+
+        # 교과목 필터링
+        filtered_data = filter_classes(all_data, day, start, end)
+
+        # 결과 출력
+        if filtered_data:
+            filename = f'{COURSE_TYPE}_{category[3:]}_{gyoyang_domain}_{day}[{start}-{end}].txt'
+            with open(filename, 'w', encoding='utf-8') as f:
+                for item in filtered_data:
+                    f.write('\t'.join(item) + '\n')
+
+            print(f'{filename} 파일 생성 완료')
+
+    except TimeoutException as e:
+        print(f"타임 아웃 발생 : {e}")
+    finally:
+        driver.quit()
 
 
 if __name__ == "__main__":
-    lst_time = [2, 1, 0.5, 0]  # 각 스레드별 진입 시간 설정
-    threadLocal = threading.local()
-
-    print("로그인 정보 입력... 정확히 입력해 주세요.")
-    id = input("학번 입력 : ")
-    pw = input("비밀번호 입력 : ")
-    print("입력 완료! 잠시후 로그인을 시도합니다.\n")
-
     main()
