@@ -9,13 +9,13 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 from webdriver_manager.chrome import ChromeDriverManager
 
-# 상수 정의
+# 기본 설정
 URL = "http://sugang.deu.ac.kr:8080/DEUSugangPage.aspx#"
 COURSE_TYPE = '교양'
 GYOYANG_INDEX = 1
-MAX_COLWIDTH = 15  # 최대 열 너비
 
 
+# 입력
 def input_schedule():
     day = input("수업 요일을 입력하세요 (예: 월, 화, 수, 목, 금): ").strip()
     time_range = input("가능한 시간을 입력하세요 (예: 1-4, 5-8): ").strip()
@@ -26,6 +26,7 @@ def input_schedule():
     return day, start, end
 
 
+# 강의 중 조건에 맞는 강의만 필터링
 def filter_classes(all_data, day, start, end):
     filtered_data = []
 
@@ -86,7 +87,9 @@ def input_user():
     return id, pw, category, gyoyang_index
 
 
+# 초기 설정
 def setup_driver():
+    # 최적화 다 때려박음(이거 나도 잘 모름)
     chrome_options = Options()
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--disable-gpu")
@@ -100,6 +103,7 @@ def setup_driver():
     return webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
 
 
+# 로그인
 def login(driver, id, pw):
     driver.get(URL)
     WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.XPATH, '//*[@id="txtID"]')))
@@ -108,6 +112,7 @@ def login(driver, id, pw):
     driver.find_element(By.XPATH, '//*[@id="ibtnLogin"]').click()
 
 
+# 드롭박스로 된 요소 선택
 def select_dropdown(driver, xpath, value):
     WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.XPATH, xpath)))
     dropdown = Select(driver.find_element(By.XPATH, xpath))
@@ -117,6 +122,7 @@ def select_dropdown(driver, xpath, value):
         dropdown.select_by_visible_text(value)
 
 
+# 테이블로 된 수강정보들 추출
 def extract_data(driver):
     all_data = []
     page_count = 2
@@ -127,6 +133,7 @@ def extract_data(driver):
             table = driver.find_element(By.ID, "CP1_grdView")
             rows = table.find_elements(By.TAG_NAME, "tr")
 
+            # 여기서 한 행씩 뽑는거
             for row in rows:
                 cells = row.find_elements(By.TAG_NAME, "td")
                 if len(cells) >= 9:
@@ -136,6 +143,7 @@ def extract_data(driver):
                     all_data.append([subject_name, classroom, professor])
 
             try:
+                # 다음 페이지로 이동
                 next_page_button = driver.find_element(By.ID, f'CP1_COM_Page_Controllor1_lbtnPage{page_count}')
                 next_page_button.click()
                 page_count += 1
@@ -151,15 +159,25 @@ def extract_data(driver):
 
 
 def main():
+    #TODO : 예외처리 좀 해주십쇼...
+    
+
+    # 사용자 입력
     id, pw, category, gyoyang_index = input_user()
+
+    # 드라이버 초기 셋업
     driver = setup_driver()
 
     try:
+        # 로그인
         login(driver, id, pw)
+
+        # 수강시간표 페이지 이동
         WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.XPATH, '//*[@id="pnl_stu"]/ul/li[2]/a')))
         driver.find_element(By.XPATH, '//*[@id="pnl_stu"]/ul/li[2]/a').click()
         driver.switch_to.frame("contentFrame")
 
+        # 드롭박스 값 입력
         select_dropdown(driver, '//*[@id="CP1_ddlSubjType"]', COURSE_TYPE)
         select_dropdown(driver, '//*[@id="CP1_ddlIsuGb"]', category)
 
